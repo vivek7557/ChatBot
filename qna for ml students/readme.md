@@ -59,7 +59,7 @@ Anyone curious about machine learning
 Friendly competition with colleagues!
 
 🚀 Try it now:
-[[Your Streamlit App URL here](https://ml-quiz-apppy-hsbfapptk78spygzunturst.streamlit.app/)]
+[[QNA Streamlit app](https://ml-quiz-apppy-hsbfapptk78spygzunturst.streamlit.app/)]
 Challenge yourself and see how many you can get right! Share your score in the comments 👇
 
 Shorter version for quick sharing:
