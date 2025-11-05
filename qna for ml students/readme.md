@@ -1,6 +1,6 @@
 # ML Mastery Challenge — README
 
-**Live demo:** [https://ml-quiz-apppy-hsbfapptk78spygzunturst.streamlit.app/](https://ml-quiz-apppy-hsbfapptk78spygzunturst.streamlit.app/)
+**Live demo:** [https://chatbot-jjgfxbkvzflq8tfmfdxezl.streamlit.app/)
 
 ---
 
