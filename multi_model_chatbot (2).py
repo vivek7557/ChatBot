@@ -24,6 +24,12 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
 
+try:
+    from transformers import pipeline, set_seed
+    HUGGINGFACE_AVAILABLE = True
+except ImportError:
+    HUGGINGFACE_AVAILABLE = False
+
 # Ollama import
 OLLAMA_AVAILABLE = True  # Always available since it's HTTP-based
 
@@ -34,6 +40,7 @@ class MultiModelChatbot:
     - Claude (Anthropic)
     - GPT (OpenAI)
     - Gemini (Google)
+    - HuggingFace (Local/Cloud)
     - Ollama (Local models)
     """
     
@@ -42,12 +49,14 @@ class MultiModelChatbot:
             'claude': [],
             'gpt': [],
             'gemini': [],
+            'huggingface': [],
             'ollama': []
         }
         
         self.anthropic_client = None
         self.openai_client = None
         self.gemini_model = None
+        self.hf_pipeline = None
         self.ollama_endpoint = "http://localhost:11434/api/chat"
         
     def setup_claude(self, api_key: str):
@@ -68,6 +77,13 @@ class MultiModelChatbot:
             raise ImportError("google-generativeai package not installed")
         genai.configure(api_key=api_key)
         self.gemini_model = GenerativeModel('gemini-pro')
+        
+    def setup_huggingface(self):
+        """Initialize HuggingFace pipeline"""
+        if not HUGGINGFACE_AVAILABLE:
+            raise ImportError("transformers package not installed")
+        # Use a lightweight model for demonstration
+        self.hf_pipeline = pipeline("text-generation", model="gpt2")
         
     def chat_with_claude(self, message: str, model: str = "claude-3-5-sonnet-20241022") -> str:
         """Send message to Claude and get response"""
@@ -156,6 +172,46 @@ class MultiModelChatbot:
         except Exception as e:
             return f"Error communicating with Gemini: {str(e)}\n\nPlease check:\n1. Your API key is valid\n2. You have enabled the Gemini API in Google Cloud\n3. Your quota is sufficient"
     
+    def chat_with_huggingface(self, message: str) -> str:
+        """Send message to HuggingFace and get response"""
+        if not self.hf_pipeline:
+            return "Error: HuggingFace pipeline not configured. Please install transformers package."
+        
+        try:
+            # Format the conversation history
+            conversation = ""
+            for msg in self.conversation_history['huggingface']:
+                role = "User" if msg['role'] == 'user' else "Assistant"
+                conversation += f"{role}: {msg['content']}\n"
+            
+            conversation += f"User: {message}\nAssistant:"
+            
+            # Generate response
+            response = self.hf_pipeline(
+                conversation,
+                max_length=len(conversation) + 200,
+                num_return_sequences=1,
+                pad_token_id=50256  # GPT2 pad token
+            )
+            
+            # Extract the new part of the response
+            full_text = response[0]['generated_text']
+            assistant_message = full_text[len(conversation):].split("\n")[0]
+            
+            # Update history
+            self.conversation_history['huggingface'].append({
+                "role": "user",
+                "content": message
+            })
+            self.conversation_history['huggingface'].append({
+                "role": "assistant",
+                "content": assistant_message
+            })
+            
+            return assistant_message
+        except Exception as e:
+            return f"Error communicating with HuggingFace: {str(e)}"
+    
     def chat_with_ollama(self, message: str, model: str = "llama3") -> str:
         """Send message to Ollama and get response"""
         try:
@@ -213,6 +269,8 @@ class MultiModelChatbot:
             return self.chat_with_gpt(message)
         elif model_name.lower() == 'gemini':
             return self.chat_with_gemini(message)
+        elif model_name.lower() == 'huggingface':
+            return self.chat_with_huggingface(message)
         elif model_name.lower() == 'ollama':
             return self.chat_with_ollama(message)
         else:
@@ -519,7 +577,10 @@ def main():
         st.session_state.chatbot = MultiModelChatbot()
     
     if 'current_model' not in st.session_state:
-        st.session_state.current_model = 'claude'
+        st.session_state.current_model = 'ollama'
+    
+    if 'editing_key' not in st.session_state:
+        st.session_state.editing_key = None
     
     # Main Header
     st.markdown("""
@@ -528,7 +589,7 @@ def main():
             <div class='header-icon'>🤖</div>
             <div>
                 <h1 class='main-title'>Enterprise AI Chatbot</h1>
-                <p class='subtitle'>Chat with Claude, GPT, Gemini, and Ollama in one place!</p>
+                <p class='subtitle'>Chat with Claude, GPT, Gemini, HuggingFace, and Ollama in one place!</p>
             </div>
         </div>
     </div>
@@ -553,54 +614,105 @@ def main():
             st.write(f"{'✅' if ANTHROPIC_AVAILABLE else '❌'} Anthropic")
             st.write(f"{'✅' if OPENAI_AVAILABLE else '❌'} OpenAI")
             st.write(f"{'✅' if GEMINI_AVAILABLE else '❌'} Google AI")
+            st.write(f"{'✅' if HUGGINGFACE_AVAILABLE else '❌'} HuggingFace")
             st.write(f"{'✅' if OLLAMA_AVAILABLE else '❌'} Ollama")
             
             st.divider()
             
-            # API Keys
+            # API Keys with edit capability
             st.subheader("API Keys")
             
+            # Claude Key
             if ANTHROPIC_AVAILABLE:
-                claude_key = st.text_input("Claude API Key", type="password", key="claude_key")
-                if claude_key and st.session_state.chatbot.anthropic_client is None:
-                    try:
-                        st.session_state.chatbot.setup_claude(claude_key)
-                        st.success("Claude configured!")
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
-            
-            if OPENAI_AVAILABLE:
-                openai_key = st.text_input("OpenAI API Key", type="password", key="openai_key")
-                if openai_key:
-                    if st.session_state.chatbot.openai_client is None:
-                        try:
-                            st.session_state.chatbot.setup_gpt(openai_key)
-                            st.success("✅ GPT configured!")
-                        except Exception as e:
-                            st.error(f"❌ Error: {str(e)}")
+                if st.session_state.editing_key == 'claude':
+                    claude_key = st.text_input("Claude API Key", type="password", key="claude_key_edit", 
+                                               value=st.session_state.get('claude_key', ''))
+                    if st.button("Save Claude Key", key="save_claude"):
+                        if claude_key:
+                            try:
+                                st.session_state.chatbot.setup_claude(claude_key)
+                                st.session_state.claude_key = claude_key
+                                st.success("Claude key saved!")
+                                st.session_state.editing_key = None
+                            except Exception as e:
+                                st.error(f"Error: {str(e)}")
+                        else:
+                            st.session_state.editing_key = None
                 else:
-                    st.info("💡 Get your API key from: https://platform.openai.com/api-keys")
+                    st.text("Claude API Key")
+                    if st.button("Edit", key="edit_claude"):
+                        st.session_state.editing_key = 'claude'
             
+            # OpenAI Key
+            if OPENAI_AVAILABLE:
+                if st.session_state.editing_key == 'openai':
+                    openai_key = st.text_input("OpenAI API Key", type="password", key="openai_key_edit", 
+                                               value=st.session_state.get('openai_key', ''))
+                    if st.button("Save OpenAI Key", key="save_openai"):
+                        if openai_key:
+                            try:
+                                st.session_state.chatbot.setup_gpt(openai_key)
+                                st.session_state.openai_key = openai_key
+                                st.success("OpenAI key saved!")
+                                st.session_state.editing_key = None
+                            except Exception as e:
+                                st.error(f"Error: {str(e)}")
+                        else:
+                            st.session_state.editing_key = None
+                else:
+                    st.text("OpenAI API Key")
+                    if st.button("Edit", key="edit_openai"):
+                        st.session_state.editing_key = 'openai'
+            
+            # Gemini Key
             if GEMINI_AVAILABLE:
-                gemini_key = st.text_input("Gemini API Key", type="password", key="gemini_key")
-                if gemini_key and st.session_state.chatbot.gemini_model is None:
-                    try:
-                        st.session_state.chatbot.setup_gemini(gemini_key)
-                        st.success("Gemini configured!")
-                    except Exception as e:
-                        st.error(f"Error: {str(e)}")
+                if st.session_state.editing_key == 'gemini':
+                    gemini_key = st.text_input("Gemini API Key", type="password", key="gemini_key_edit", 
+                                               value=st.session_state.get('gemini_key', ''))
+                    if st.button("Save Gemini Key", key="save_gemini"):
+                        if gemini_key:
+                            try:
+                                st.session_state.chatbot.setup_gemini(gemini_key)
+                                st.session_state.gemini_key = gemini_key
+                                st.success("Gemini key saved!")
+                                st.session_state.editing_key = None
+                            except Exception as e:
+                                st.error(f"Error: {str(e)}")
+                        else:
+                            st.session_state.editing_key = None
+                else:
+                    st.text("Gemini API Key")
+                    if st.button("Edit", key="edit_gemini"):
+                        st.session_state.editing_key = 'gemini'
+            
+            # HuggingFace Key
+            if HUGGINGFACE_AVAILABLE:
+                if st.session_state.editing_key == 'huggingface':
+                    if st.button("Initialize HuggingFace", key="init_hf"):
+                        try:
+                            st.session_state.chatbot.setup_huggingface()
+                            st.success("HuggingFace initialized!")
+                            st.session_state.editing_key = None
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+                else:
+                    st.text("HuggingFace Pipeline")
+                    if st.button("Initialize", key="init_hf_btn"):
+                        st.session_state.editing_key = 'huggingface'
             
             st.divider()
             
             # Model selection
             st.subheader("Select Model")
             available_models = []
-            if st.session_state.chatbot.anthropic_client:
+            if ANTHROPIC_AVAILABLE and st.session_state.get('claude_key'):
                 available_models.append('claude')
-            if st.session_state.chatbot.openai_client:
+            if OPENAI_AVAILABLE and st.session_state.get('openai_key'):
                 available_models.append('gpt')
-            if st.session_state.chatbot.gemini_model:
+            if GEMINI_AVAILABLE and st.session_state.get('gemini_key'):
                 available_models.append('gemini')
+            if HUGGINGFACE_AVAILABLE:
+                available_models.append('huggingface')
             available_models.append('ollama')  # Always available
             
             if available_models:
@@ -656,9 +768,6 @@ def main():
             
             # Display assistant response
             st.markdown(f"<div class='assistant-message'><strong>AI:</strong> {response}</div>", unsafe_allow_html=True)
-            
-            # Rerun to update chat display
-            st.rerun()
 
 
 if __name__ == "__main__":
