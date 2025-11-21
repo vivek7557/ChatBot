@@ -703,7 +703,6 @@ def main():
             """, unsafe_allow_html=True)
             
             # Clear input after sending
-            st.session_state.user_input = ""
             st.rerun()
 
     # Footer
